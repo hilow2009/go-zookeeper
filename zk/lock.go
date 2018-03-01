@@ -1,6 +1,7 @@
 package zk
 
 import (
+	"time"
 	"errors"
 	"fmt"
 	"strconv"
@@ -12,6 +13,7 @@ var (
 	ErrDeadlock = errors.New("zk: trying to acquire a lock twice")
 	// ErrNotLocked is returned by Unlock when trying to release a lock that has not first be acquired.
 	ErrNotLocked = errors.New("zk: not locked")
+	ErrLockTimeOut = errors.New("zk: lock timeout")
 )
 
 // Lock is a mutual exclusion lock.
@@ -124,9 +126,15 @@ func (l *Lock) Lock() error {
 			continue
 		}
 
-		ev := <-ch
-		if ev.Err != nil {
-			return ev.Err
+		select {
+			case ev := <-ch : {
+				if ev.Err != nil {
+					return ev.Err
+				}
+			}
+			case <-time.After(time.Second * 25): {
+				return ErrLockTimeOut
+			}
 		}
 	}
 
@@ -143,6 +151,9 @@ func (l *Lock) Unlock() error {
 	}
 	if err := l.c.Delete(l.lockPath, -1); err != nil {
 		return err
+	}
+	if err := l.c.Delete(l.path, -1); err != nil {
+		fmt.Println("Unlock error del path=", l.path, ",err", err)
 	}
 	l.lockPath = ""
 	l.seq = 0
